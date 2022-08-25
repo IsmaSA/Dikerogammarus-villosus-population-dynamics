@@ -1,5 +1,5 @@
 
-# Script for Tracking a voracious killer: Dikerogammarus villosus invasion dynamics across Europe
+# Script for Tracking a killer shrimp: Dikerogammarus villosus invasion dynamics across Europe
 
 ##load packages
 suppressMessages({
@@ -35,29 +35,73 @@ print(res)
 summary(res)
 #we repeated this process for each time series. 
 
-##Meta-regression of Dikerogammarus villosus
-df1<- df %>% mutate(const=1)
-res <- rma.mv(S_Dv, Var_Dv,  random = ~ site_id | const, data= df1)
+##Meta-regression 
+
+df1<- df[!duplicated(df$site_id), ] 
+df1<- df1 %>% mutate(const=1)
+
+res <- rma.mv(S_Dv, Var_Dv,  random = ~ E+N | const,  struct="SPGAU", data= df1)
+
 res
 forest(res, showweights = T, order="obs", slab= df1$site_id)
 
-#We repeated this for each community metrics (i.e. Abundance, Richness, Shannon diversity and Evenness Pielou)
 
-##Cheked bias
+res1 <- rma.mv(S_Abun, Var_Abun,  random = ~ E+N | const, struct="SPGAU",
+               mods=~ S_Dv +Middle_point , data= df1, control=list(maxiter=1000))
+res1
+forest(res1, showweights = T, order="obs", slab= df1$site_id)
+
+res2 <- rma.mv(S_Rich,Var_Rich, random = ~ E+N | const ,
+               mods=~ S_Dv +Middle_point, struct="SPGAU",
+               data= df1, control=list(maxiter=1000))
+res2
+forest(res2, showweights = T, order="obs", slab= df1$site_id)
+
+
+res3 <- rma.mv(S_Diver, Var_Diver, random = ~ E+N | const,
+               mods=~ S_Dv +Middle_point, struct="SPGAU",
+               data= df1, control=list(maxiter=1000))
+res3
+forest(res3, showweights = T, order="obs", slab= df1$site_id)
+
+res4 <- rma.mv(S_Turn, Var_Turn, random = ~ E+N | const, struct="SPGAU",mods=~ S_Dv +
+                 Middle_point, data= df1, control=list(maxiter=1000))
+res4
+forest(res4, showweights = T, order="obs", slab= df1$site_id)
+
+res5 <- rma.mv(S_Eve, Var_Eve, random = ~ E+N | const, struct="SPGAU",mods=~ S_Dv +
+                 Middle_point, data= df1, control=list(maxiter=1000))
+res5
+forest(res5, showweights = T, order="obs", slab= df1$site_id)
+
+
+
+#Example of Egger test (Repeated for each model)
+res
+resid = rstandard(res)
+eggers <- regtest(x = resid$resid, sei =sqrt(df1$Var_Dv), model = "lm")
+eggers 
+
 #Funnel plot
 funnel(res, shade = c("white","gray55", "gray75"), refline = 0, legend=F) #We repeated this for each meta-regression model
 
-#Egger test
-resid <- rstandard(res)
-eggers <- regtest(x = resid$resid, sei =sqrt(df$Var_Dv), model = "lm") 
-eggers  
+
+#Heterogeneity I2
+W <- diag(1/df1$Var_Dv)
+X <- model.matrix(res)
+P <- W - W %*% X %*% solve(t(X) %*% W %*% X) %*% t(X) %*% W
+I2 <- 100 * res$sigma2 / (sum(res$sigma2) + (res$k-res$p)/sum(diag(P)))
+names(I2) <- c("Easy")
+round(I2, 2)
+cat("Total I2: ", round(sum(I2), 2))
 
 
-## Generalise Lineal Model 
+
+
+## Generalised Lineal Model 
 
 #Before run this model, first we checked the collinearity using the corvif function
-# Functions from Zuur book on mixed models
-# at https://highstat.com/index.php/mixed-effects-models-and-extensions-in-ecology-with-r
+# Functions from Zuur et al., 2009
 myvif <- function(mod) {
   v <- vcov(mod)
   assign <- attributes(model.matrix(mod))$assign
@@ -110,32 +154,7 @@ corvif <- function(dataz) {
   print(myvif(lm_mod))
 }
 
-# Run a model selection
-#Using as example Raw-Evennes trend, adding all covariates
-res1 <- glmulti(Eveness ~    Middle_point+ 
-                  Years.Total+ 
-                  Biogeo+
-                  N+
-                  Elevation+
-                  Precipitation + 
-                  slope_preci+
-                  Temperature + 
-                  slope_temp+
-                  Mean_precipita + 
-                  Mean_temp + 
-                  DistanceKm +
-                  slope + 
-                  Tmin + 
-                  Slope_Tmin+
-                  Slope_Tmax+
-                  Tmax+
-                  S_Dv,
-                data=df,
-                level=1, method="ML",crit="aicc", confsetsize=128)
-print(res1)
-top <- weightable(res1)
-top <- top[top$aicc <= min(top$aicc) + 1,]
-top #We selected the model with the lowest AIC
+
 
 #This process was repeated for each model 
 
@@ -148,16 +167,77 @@ top #We selected the model with the lowest AIC
 #Temperature: Mean daily temperature
 #DistanceKm: Distance to the next Dams
 #Middle_point: Middle year of each time series
-#Ecossytem: Type of ecosystems (i.e. stream or river)
+#Ecossytem: Type of ecosystems (i.e. stream or large river)
+
+
 
 colnames(df)
+df1 <- df[!duplicated(df$site_id),]
+moderators <- c("S_Dv", "E","N","Elevation","Slope_preci","Slope_temp","Mean_precipita",
+                "Mean_temp","DistanceKm","slope","Avg_Tmin","Slope_Tmin","Slope_Tmax","Avg_Tmax","Middle_point")
 
-model_Dv <- glm(S_Dv ~ Bio_region +  Years_Total + Elevation  + East + Precipitation + Temperature + 
-                  DistanceKm + Middle_point+ Ecosystem, data=df)
+corvif(mutate_if(df1[, moderators], is.factor, as.numeric))
+#VIF =5
 
-summary(model_Dv)
+#Rate of change of D. villosus trend
+m1 <- glm(S_Dv ~  
+            Elevation+
+            Slope_preci+
+            Slope_temp+
+            Mean_precipita +
+            Mean_temp+
+            DistanceKm+
+            slope+
+            Avg_Tmax+
+            Avg_Tmin+
+            Slope_Tmax+
+            Middle_point+
+            Biogeo+
+            Ecosystem,
+          data = df1, na.action="na.fail")
+
+summary(m1)
 
 
+p<- plot_model(m1, vline.color = "black", sort.est = TRUE,show.values = TRUE, value.offset = .3)
+
+
+p <- plot_model(m1, vline.color = "red", transform = NULL)
+p<-plot_model(m1, type = "eff", terms = "Middle_point")
+p + theme_sjplot()
+p
+
+moderators <- c("Proportion", "E","N","Elevation","Precipitation","Temperature",
+                "DistanceKm","slope","Middle_point","Tmax","Tmin","year","Avg_Tmax","Avg_Tmin","Mean_precipita",
+                "Mean_temp")
+
+
+corvif(mutate_if(df[, moderators], is.factor, as.numeric))
+
+
+
+## Relative abundance model (i.e. Dominance).
+m3 <- glm(Proportion ~  
+            Elevation+
+            Precipitation  +
+            Temperature    +
+            Mean_temp+
+            DistanceKm+
+            slope+
+            Tmin           +
+            Avg_Tmax       +
+            Tmax           +
+            year           +
+            Biogeo+
+            Ecosystem,
+          data = df,family = "quasibinomial",  na.action="na.fail")
+
+summary(m3)
+
+p<- plot_model(m3, vline.color = "black", sort.est = TRUE, show.values = TRUE, value.offset = .3,
+               transform = NULL)
+p<-plot_model(m3, type = "eff", terms = "year")
+p + theme_sjplot()
 
 
 
